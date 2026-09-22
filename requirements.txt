@@ -1,0 +1,7 @@
+streamlit==1.50.0
+torch @ https://download.pytorch.org/whl/cpu/torch-2.11.0%2Bcpu-cp312-cp312-manylinux_2_28_x86_64.whl
+torchvision @ https://download.pytorch.org/whl/cpu/torchvision-0.26.0%2Bcpu-cp312-cp312-manylinux_2_28_x86_64.whl
+timm==1.0.27
+numpy==1.26.4
+pandas==2.2.3
+Pillow==11.1.0
