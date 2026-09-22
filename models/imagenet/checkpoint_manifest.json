@@ -1,0 +1,26 @@
+{
+  "format": "driving-perception-checkpoint-v2",
+  "architecture": "ImageNet ViT-S/16 timm + SFP P2-P6 + Faster R-CNN",
+  "storage_dtype": "float16",
+  "runtime_dtype": "float32",
+  "sha256": "f4be8b25db6d392b2c86d8dc64529a39f75c4a8f984ee3a200a261dccad4dc67",
+  "total_bytes": 78177035,
+  "parts": [
+    {
+      "name": "best_detector.pt.part001",
+      "bytes": 20971520
+    },
+    {
+      "name": "best_detector.pt.part002",
+      "bytes": 20971520
+    },
+    {
+      "name": "best_detector.pt.part003",
+      "bytes": 20971520
+    },
+    {
+      "name": "best_detector.pt.part004",
+      "bytes": 15262475
+    }
+  ]
+}
