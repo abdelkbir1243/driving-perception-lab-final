@@ -1,0 +1,26 @@
+{
+  "format": "driving-perception-checkpoint-v2",
+  "architecture": "Driving-Aware I-JEPA ViT-S/16 + SFP P2-P6 + Faster R-CNN",
+  "storage_dtype": "float16",
+  "runtime_dtype": "float32",
+  "sha256": "f5c7d5c5feb5eb91cd5633bb4f5da77dd4e0ab4d5d919a77e301ec1e94baa9e4",
+  "total_bytes": 78175111,
+  "parts": [
+    {
+      "name": "best_detector.pt.part001",
+      "bytes": 20971520
+    },
+    {
+      "name": "best_detector.pt.part002",
+      "bytes": 20971520
+    },
+    {
+      "name": "best_detector.pt.part003",
+      "bytes": 20971520
+    },
+    {
+      "name": "best_detector.pt.part004",
+      "bytes": 15260551
+    }
+  ]
+}
