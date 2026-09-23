@@ -43,7 +43,9 @@ CLASS_COLORS = {
 IMAGE_MEAN = [0.485, 0.456, 0.406]
 IMAGE_STD = [0.229, 0.224, 0.225]
 
-DEFAULT_CONFIDENCE = 0.50
+# 0.20 est un meilleur point de départ pour des photos externes à KITTI.
+# Le seuil scientifique 0.50 reste rappelé dans les métriques de validation.
+DEFAULT_CONFIDENCE = 0.20
 IOU_DISPLAY_VALUE = 0.50
 DEFAULT_SMALL_OBJECT_RATIO = 0.01
 
