@@ -8,7 +8,7 @@ from typing import Any
 
 import numpy as np
 import torch
-from PIL import Image
+from PIL import Image, ImageOps
 from torchvision.transforms.functional import pil_to_tensor
 
 from config import CLASS_NAMES, INPUT_HEIGHT, INPUT_WIDTH
@@ -30,7 +30,9 @@ def letterbox_image(
     target_width: int = INPUT_WIDTH,
     target_height: int = INPUT_HEIGHT,
 ) -> tuple[Image.Image, LetterboxMetadata]:
-    image = image.convert("RGB")
+    # Respecte l'orientation EXIF des photos de téléphone avant tout calcul
+    # géométrique. Sans cette étape, une photo peut être analysée tournée.
+    image = ImageOps.exif_transpose(image).convert("RGB")
     original_width, original_height = image.size
     if original_width <= 0 or original_height <= 0:
         raise ValueError("L'image possède une résolution invalide.")
@@ -84,9 +86,14 @@ def run_inference(
     image: Image.Image,
     device: torch.device,
 ) -> dict[str, Any]:
-    """Exécute une seule inférence et conserve toutes les sorties >= 0.05."""
+    """Exécute l'inférence et conserve les candidats utiles au diagnostic.
 
-    original = image.convert("RGB")
+    Le filtrage visible reste piloté par l'interface. Ici, on garde les
+    prédictions à partir de 0.01 afin de pouvoir distinguer clairement :
+    absence de proposition, score faible et seuil utilisateur trop élevé.
+    """
+
+    original = ImageOps.exif_transpose(image).convert("RGB")
     prepared, metadata = letterbox_image(original)
     tensor = pil_to_tensor(prepared).float().div(255.0).to(device)
 
@@ -104,12 +111,27 @@ def run_inference(
     scores = prediction["scores"].detach().cpu().numpy()
     boxes = _boxes_to_original(boxes, metadata)
 
-    valid = (
-        (scores >= 0.05)
-        & np.isfinite(boxes).all(axis=1)
+    valid_geometry = (
+        np.isfinite(boxes).all(axis=1)
         & (boxes[:, 2] > boxes[:, 0])
         & (boxes[:, 3] > boxes[:, 1])
     )
+    valid = (scores >= 0.01) & valid_geometry
+
+    valid_scores = scores[valid_geometry]
+    max_raw_score = float(valid_scores.max()) if valid_scores.size else 0.0
+    raw_candidates = []
+    raw_order = np.argsort(scores)[::-1][:10]
+    for index in raw_order:
+        label = int(labels[index])
+        if label not in CLASS_NAMES or label == 0:
+            continue
+        raw_candidates.append(
+            {
+                "class_name": CLASS_NAMES[label],
+                "confidence": float(scores[index]),
+            }
+        )
     detections = []
     image_area = float(original.width * original.height)
     for box, label, score in zip(boxes[valid], labels[valid], scores[valid]):
@@ -147,6 +169,20 @@ def run_inference(
         "device": "CUDA" if device.type == "cuda" else "CPU",
         "original_width": original.width,
         "original_height": original.height,
+        "prepared_width": INPUT_WIDTH,
+        "prepared_height": INPUT_HEIGHT,
+        "source_aspect_ratio": original.width / original.height,
+        "target_aspect_ratio": INPUT_WIDTH / INPUT_HEIGHT,
+        "letterbox_scale": metadata.scale,
+        "pad_left": metadata.pad_left,
+        "pad_top": metadata.pad_top,
+        "padding_fraction": 1.0
+        - (metadata.resized_width * metadata.resized_height)
+        / float(INPUT_WIDTH * INPUT_HEIGHT),
+        "raw_prediction_count": int(len(scores)),
+        "candidates_above_001": int(np.sum(valid)),
+        "max_raw_score": max_raw_score,
+        "raw_candidates": raw_candidates,
     }
 
 
