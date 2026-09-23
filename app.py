@@ -10,7 +10,7 @@ from io import BytesIO
 import pandas as pd
 import streamlit as st
 import torch
-from PIL import Image, UnidentifiedImageError
+from PIL import Image, ImageOps, UnidentifiedImageError
 
 from checkpoint_files import inspect_checkpoint, resolve_checkpoint
 from config import (
@@ -22,7 +22,7 @@ from config import (
     DISPLAY_CLASSES,
     VALIDATION_METRICS,
 )
-from inference import filter_detections, run_inference
+from inference import filter_detections, letterbox_image, run_inference
 from model import load_model
 from ui import hero, load_css, metric_card, section_label, system_card
 from visualization import detections_dataframe, draw_detections, image_to_png_bytes
@@ -60,7 +60,7 @@ def load_uploaded_image(uploaded_file) -> tuple[Image.Image | None, str | None, 
             return None, None, "L'image dépasse 20 MiB."
         candidate = Image.open(BytesIO(payload))
         candidate.verify()
-        image = Image.open(BytesIO(payload)).convert("RGB")
+        image = ImageOps.exif_transpose(Image.open(BytesIO(payload))).convert("RGB")
         image.load()
         return image, hashlib.sha256(payload).hexdigest(), None
     except (UnidentifiedImageError, OSError, ValueError) as exc:
@@ -105,10 +105,52 @@ def render_scene_metrics(detections: list[dict], result: dict, small_ratio: floa
             metric_card(*card)
 
 
-def render_registry(name: str, image: Image.Image, detections: list[dict], small_ratio: float) -> None:
+def render_registry(
+    name: str,
+    image: Image.Image,
+    detections: list[dict],
+    small_ratio: float,
+    result: dict,
+    confidence_threshold: float,
+    selected_classes: list[str],
+) -> None:
     dataframe = detections_dataframe(detections, small_ratio)
     if dataframe.empty:
-        st.info("Aucun objet ne dépasse les filtres sélectionnés.")
+        max_score = float(result.get("max_raw_score", 0.0))
+        if not selected_classes:
+            st.warning("Aucune classe n'est sélectionnée. Activez au moins une classe dans la barre latérale.")
+        elif max_score > 0:
+            st.warning(
+                "Aucune détection ne dépasse le seuil actuel. "
+                f"Meilleur candidat brut : **{max_score:.1%}** · "
+                f"seuil choisi : **{confidence_threshold:.1%}**."
+            )
+            if max_score < confidence_threshold:
+                st.caption(
+                    "Abaissez temporairement le seuil sous le meilleur score pour inspecter la sortie. "
+                    "Un score faible sur une photo externe peut refléter un décalage avec le domaine KITTI."
+                )
+        else:
+            st.error(
+                "Le modèle n'a renvoyé aucun candidat exploitable. "
+                "Testez une scène routière horizontale proche de KITTI, puis vérifiez le checkpoint si le problème persiste."
+            )
+
+        raw_candidates = result.get("raw_candidates", [])
+        if raw_candidates:
+            with st.expander("Voir les meilleurs candidats bruts", expanded=True):
+                st.dataframe(
+                    pd.DataFrame(raw_candidates).rename(
+                        columns={"class_name": "Classe", "confidence": "Confiance"}
+                    ),
+                    hide_index=True,
+                    use_container_width=True,
+                    column_config={
+                        "Confiance": st.column_config.ProgressColumn(
+                            "Confiance", min_value=0.0, max_value=1.0, format="%.3f"
+                        )
+                    },
+                )
     else:
         st.dataframe(
             dataframe,
@@ -165,7 +207,12 @@ with st.sidebar:
     )
     st.divider()
     confidence_threshold = st.slider(
-        "Seuil de confiance", 0.10, 0.95, DEFAULT_CONFIDENCE, 0.05
+        "Seuil de confiance",
+        min_value=0.01,
+        max_value=0.95,
+        value=DEFAULT_CONFIDENCE,
+        step=0.01,
+        help="Commencez à 0.20 pour une photo externe. Utilisez 0.50 pour reproduire le protocole de validation.",
     )
     selected_classes = st.multiselect(
         "Classes visibles", DISPLAY_CLASSES, default=DISPLAY_CLASSES
@@ -274,6 +321,32 @@ else:
     annotated = {name: draw_detections(image, filtered[name]) for name in required}
     section_label("02 · Résultat du test")
 
+    reference_result = results[required[0]]
+    padding_percent = reference_result.get("padding_fraction", 0.0) * 100
+    source_ratio = reference_result.get("source_aspect_ratio", image.width / image.height)
+    if padding_percent >= 35:
+        st.warning(
+            f"Géométrie éloignée de KITTI : ratio source {source_ratio:.2f}:1, "
+            f"avec {padding_percent:.0f}% de padding après letterbox. "
+            "Une photo horizontale de scène routière donnera une analyse plus fiable."
+        )
+    else:
+        st.caption(
+            f"Prétraitement vérifié · orientation EXIF corrigée · letterbox 1024 × 320 · "
+            f"padding {padding_percent:.1f}%"
+        )
+
+    with st.expander("Contrôle de la géométrie envoyée au modèle", expanded=False):
+        prepared_preview, preview_meta = letterbox_image(image)
+        st.image(
+            prepared_preview,
+            caption=(
+                f"Entrée réelle du modèle · 1024 × 320 · échelle {preview_meta.scale:.4f} · "
+                f"padding gauche {preview_meta.pad_left}px · haut {preview_meta.pad_top}px"
+            ),
+            use_container_width=True,
+        )
+
     if mode == COMPARE:
         left, right = st.columns(2, gap="medium")
         with left:
@@ -321,7 +394,15 @@ else:
             if mode == COMPARE
             else mode
         )
-        render_registry(selected_registry, image, filtered[selected_registry], small_ratio)
+        render_registry(
+            selected_registry,
+            image,
+            filtered[selected_registry],
+            small_ratio,
+            results[selected_registry],
+            confidence_threshold,
+            selected_classes,
+        )
 
     with validation_tab:
         comparison_table = pd.DataFrame.from_dict(COMPARISON_METRICS, orient="index")
